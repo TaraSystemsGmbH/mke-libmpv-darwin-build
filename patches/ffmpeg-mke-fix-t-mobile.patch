@@ -1,0 +1,99 @@
+diff --git a/libavformat/tcp.c b/libavformat/tcp.c
+--- a/libavformat/tcp.c
++++ b/libavformat/tcp.c
+@@ -44,6 +44,7 @@ typedef struct TCPContext {
+ #if !HAVE_WINSOCK2_H
+     int tcp_mss;
+ #endif /* !HAVE_WINSOCK2_H */
++    char *localaddr;
+ } TCPContext;
+
+ #define OFFSET(x) offsetof(TCPContext, x)
+@@ -60,6 +61,7 @@ static const AVOption options[] = {
+ #if !HAVE_WINSOCK2_H
+     { "tcp_mss",     "Maximum segment size for outgoing TCP packets",          OFFSET(tcp_mss),     AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
+ #endif /* !HAVE_WINSOCK2_H */
++    { "localaddr",   "Local address",                                          OFFSET(localaddr),   AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, .flags = D|E },
+     { NULL }
+ };
+
+@@ -97,6 +99,15 @@ static void customize_fd(void *ctx, int fd)
+         }
+     }
+ #endif /* !HAVE_WINSOCK2_H */
++    if (s->localaddr && s->localaddr[0]) {
++        struct addrinfo lhints = { 0 }, *lres;
++        lhints.ai_socktype = SOCK_STREAM;
++        if (getaddrinfo(s->localaddr, NULL, &lhints, &lres) == 0) {
++            if (bind(fd, lres->ai_addr, lres->ai_addrlen))
++                ff_log_net_error(ctx, AV_LOG_WARNING, "bind to local address");
++            freeaddrinfo(lres);
++        }
++    }
+ }
+
+ /* return non zero if error */
+@@ -138,6 +149,13 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
+         if (av_find_info_tag(buf, sizeof(buf), "tcp_nodelay", p)) {
+             s->tcp_nodelay = strtol(buf, NULL, 10);
+         }
++        if (av_find_info_tag(buf, sizeof(buf), "localaddr", p)) {
++            av_freep(&s->localaddr);
++            s->localaddr = av_strdup(buf);
++            if (!s->localaddr) {
++                return AVERROR(ENOMEM);
++            }
++        }
+     }
+     if (s->rw_timeout >= 0) {
+         s->open_timeout =
+@@ -143,7 +161,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
+         s->open_timeout =
+         h->rw_timeout   = s->rw_timeout;
+     }
+-    hints.ai_family = AF_UNSPEC;
++    hints.ai_family = s->localaddr && s->localaddr[0] ? AF_INET : AF_UNSPEC;
+     hints.ai_socktype = SOCK_STREAM;
+     snprintf(portstr, sizeof(portstr), "%d", port);
+     if (s->listen)
+diff --git a/libavformat/rtsp.c b/libavformat/rtsp.c
+--- a/libavformat/rtsp.c
++++ b/libavformat/rtsp.c
+@@ -101,6 +101,7 @@ const AVOption ff_rtsp_options[] = {
+     { "timeout", "set timeout (in microseconds) of socket I/O operations", OFFSET(stimeout), AV_OPT_TYPE_INT64, {.i64 = 0}, INT_MIN, INT64_MAX, DEC },
+     COMMON_OPTS(),
+     { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = LIBAVFORMAT_IDENT}, 0, 0, DEC },
++    { "localaddr", "Local address", OFFSET(localaddr), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
+     { NULL },
+ };
+
+@@ -1890,9 +1891,14 @@
+     } else {
+         int ret;
+         /* open the tcp connection */
+-        ff_url_join(tcpname, sizeof(tcpname), lower_rtsp_proto, NULL,
+-                    host, port,
+-                    "?timeout=%"PRId64, rt->stimeout);
++        if (rt->localaddr && rt->localaddr[0])
++            ff_url_join(tcpname, sizeof(tcpname), lower_rtsp_proto, NULL,
++                        host, port,
++                        "?timeout=%"PRId64"&localaddr=%s", rt->stimeout, rt->localaddr);
++        else
++            ff_url_join(tcpname, sizeof(tcpname), lower_rtsp_proto, NULL,
++                        host, port,
++                        "?timeout=%"PRId64, rt->stimeout);
+         if ((ret = ffurl_open_whitelist(&rt->rtsp_hd, tcpname, AVIO_FLAG_READ_WRITE,
+                        &s->interrupt_callback, NULL, s->protocol_whitelist, s->protocol_blacklist, NULL)) < 0) {
+             err = ret;
+diff --git a/libavformat/udp.c b/libavformat/udp.c
+--- a/libavformat/udp.c
++++ b/libavformat/udp.c
+@@ -361,6 +361,8 @@ static int udp_socket_create(URLContext *h, struct sockaddr_storage *addr,
+
+     if (((struct sockaddr *) &s->dest_addr)->sa_family)
+         family = ((struct sockaddr *) &s->dest_addr)->sa_family;
++    if (localaddr && localaddr[0])
++        family = AF_INET;
+     res0 = ff_ip_resolve_host(h, (localaddr && localaddr[0]) ? localaddr : NULL,
+                             s->local_port,
+                             SOCK_DGRAM, family, AI_PASSIVE);

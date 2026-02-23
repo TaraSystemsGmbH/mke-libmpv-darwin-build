@@ -40,6 +40,7 @@ disable_all_options = [
 
 common_options = [
     '--prefix=@PREFIX@',
+    '--extra-version=mke-001',
     '--enable-small', # reduce libs size
     '--enable-optimizations',
     '--enable-shared',
