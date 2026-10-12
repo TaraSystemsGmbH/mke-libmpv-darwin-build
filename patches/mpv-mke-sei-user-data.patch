@@ -6,9 +6,9 @@ index 0eb13a7..839a979 100644
      return M_PROPERTY_UNAVAILABLE;
  }
  
-+// [stream_player test patch] SEI user_data_unregistered of the frame on screen,
-+// as hex (16-byte UUID + payload). Several messages are separated by ','.
-+// Unavailable when the frame carries none.
++// SEI user_data_unregistered messages of the frame on screen, as hex
++// (16-byte UUID + payload each), separated by ','. Unavailable if the frame
++// carries none.
 +static int mp_property_sei_user_data(void *ctx, struct m_property *prop,
 +                                     int action, void *arg)
 +{
